@@ -26,8 +26,8 @@ func (cli *CommandLine) validateArgs() {
 	}
 }
 
-func (cli *CommandLine) addBlock(data string) {
-	cli.blockchain.AddBlock(data)
+func (cli *CommandLine) addBlock(transactions []*blockchain.Transaction) {
+	cli.blockchain.AddBlock(transactions)
 	fmt.Println("Added Block!")
 }
 
@@ -38,7 +38,7 @@ func (cli *CommandLine) printChain() {
 		block := iter.Next()
 
 		fmt.Printf("Prev. hash: %x\n", block.PrevHash)
-		fmt.Printf("Data: %s\n", block.Data)
+		fmt.Printf("Data: %s\n", block.HashTransactions())
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := blockchain.NewProof(block)
 		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
@@ -76,7 +76,7 @@ func (cli *CommandLine) run() {
 			addBlockCmd.Usage()
 			runtime.Goexit()
 		}
-		cli.addBlock(*addBlockData)
+		// cli.addBlock(*addBlockData)
 	}
 
 	if printChainCmd.Parsed() {

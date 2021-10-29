@@ -21,7 +21,7 @@ import (
 // Requirements:
 // The First few bytes must contain 0s
 
-const Difficulty = 12
+const Difficulty = 16
 
 type ProofOfWork struct {
 	Block  *Block
@@ -40,7 +40,7 @@ func NewProof(b *Block) *ProofOfWork {
 func (pow *ProofOfWork) InitData(nonce int) []byte {
 	data := bytes.Join([][]byte{
 		pow.Block.PrevHash,
-		pow.Block.Data,
+		pow.Block.HashTransactions(),
 		ToHex(int64(nonce)),
 		ToHex(int64(Difficulty)),
 	},

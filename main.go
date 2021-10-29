@@ -2,21 +2,14 @@ package main
 
 import (
 	"golang_blockchain/blockchain"
+	"os"
 )
 
 func main() {
-	chain := blockchain.InitBlockchain()
+	defer os.Exit(0)
+	chain := blockchain.InitBlockchain("ad")
+	defer chain.Database.Close()
 
-	chain.AddBlock("hakiem")
-	chain.AddBlock("hoaithuong")
-
-	// for _, block := range chain.Blocks {
-	// 	fmt.Printf("Previous Hash: %x\n", block.PrevHash)
-	// 	fmt.Printf("Data in Block: %s\n", block.Data)
-	// 	fmt.Printf("Hash: %x\n", block.Hash)
-
-	// 	pow := blockchain.NewProof(block)
-	// 	fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
-	// 	fmt.Println()
-	// }
+	cli := CommandLine{chain}
+	cli.run()
 }

@@ -1,7 +1,10 @@
 package blockchain
 
 import (
+	"encoding/hex"
 	"fmt"
+	"os"
+	"runtime"
 
 	"github.com/boltdb/bolt"
 )
@@ -9,6 +12,7 @@ import (
 const (
 	dbPath       = "./tmp/blocks/blockchain.db"
 	blocksBucket = "blocks"
+	genesisData  = "First Transaction from Genesis"
 )
 
 type Blockchain struct {
@@ -21,9 +25,41 @@ type BlockChainIterator struct {
 	Database    *bolt.DB
 }
 
-func InitBlockchain() *Blockchain {
+func dbExists() bool {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return false
+	}
+
+	return true
+}
+
+func ContinueBlockChain(address string) *Blockchain {
+	if !dbExists() {
+		fmt.Println("No existing blockchain found, create one!")
+		runtime.Goexit()
+	}
 	var lastHash []byte
 
+	db, err := bolt.Open(dbPath, 0600, nil)
+	Handle(err)
+	err = db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(blocksBucket))
+		lastHash = bucket.Get([]byte("lh"))
+		return nil
+	})
+	Handle(err)
+
+	chain := &Blockchain{LastHash: lastHash, Database: db}
+	return chain
+}
+
+func InitBlockchain(address string) *Blockchain {
+	if dbExists() {
+		fmt.Println("Blockchain already exists.")
+		os.Exit(1)
+	}
+
+	var lastHash []byte
 	db, err := bolt.Open(dbPath, 0600, nil)
 
 	if err != nil {
@@ -35,7 +71,8 @@ func InitBlockchain() *Blockchain {
 
 		if bucket == nil {
 			fmt.Println("No existing blockchain found. Creating a new one...")
-			genesis := Genesis()
+			cbtx := CoinBaseTx(address, genesisData)
+			genesis := Genesis(cbtx)
 
 			bucket, err = tx.CreateBucket([]byte(blocksBucket))
 			if err != nil {
@@ -59,7 +96,7 @@ func InitBlockchain() *Blockchain {
 	return &Blockchain{LastHash: lastHash, Database: db}
 }
 
-func (chain *Blockchain) AddBlock(data string) {
+func (chain *Blockchain) AddBlock(transactions []*Transaction) {
 	var lashHash []byte
 
 	err := chain.Database.View(func(tx *bolt.Tx) error {
@@ -69,7 +106,7 @@ func (chain *Blockchain) AddBlock(data string) {
 	})
 	Handle(err)
 
-	newBlock := CreateBlock(data, lashHash)
+	newBlock := CreateBlock(transactions, lashHash)
 
 	err = chain.Database.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))
@@ -101,4 +138,81 @@ func (iter *BlockChainIterator) Next() *Block {
 	Handle(err)
 	iter.CurrentHash = block.PrevHash
 	return block
+}
+
+func (chain *Blockchain) FindUnspentTransactions(address string) []Transaction {
+	var unspentTxs []Transaction
+	spentTXOs := make(map[string][]int)
+
+	iter := chain.Iterator()
+
+	for {
+		block := iter.Next()
+		for _, tx := range block.Transactions {
+			txID := hex.EncodeToString(tx.ID)
+
+		Outputs:
+			for outIdx, out := range tx.Outputs {
+				if spentTXOs[txID] != nil {
+					for _, spentOut := range spentTXOs[txID] {
+						if spentOut == outIdx {
+							continue Outputs
+						}
+					}
+				}
+				if out.CanBeUnlocked(address) {
+					unspentTxs = append(unspentTxs, *tx)
+				}
+			}
+			if !tx.IsCoinbase() {
+				for _, in := range tx.Inputs {
+					if in.CanUnlock(address) {
+						inTxID := hex.EncodeToString(in.ID)
+						spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Out)
+					}
+				}
+			}
+		}
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+	return unspentTxs
+}
+
+func (chain *Blockchain) FindUTXO(address string) []TxOutput {
+	var UTXOs []TxOutput
+	unspentTransactions := chain.FindUnspentTransactions(address)
+
+	for _, tx := range unspentTransactions {
+		for _, out := range tx.Outputs {
+			if out.CanBeUnlocked(address) {
+				UTXOs = append(UTXOs, out)
+			}
+		}
+	}
+	return UTXOs
+}
+
+func (chain *Blockchain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
+	unspentOuts := make(map[string][]int)
+	unspentTxs := chain.FindUnspentTransactions(address)
+	accumulated := 0
+
+Work:
+	for _, tx := range unspentTxs {
+		txID := hex.EncodeToString(tx.ID)
+
+		for outIdx, out := range tx.Outputs {
+			if out.CanBeUnlocked(address) && accumulated < amount {
+				accumulated += out.Value
+				unspentOuts[txID] = append(unspentOuts[txID], outIdx)
+
+				if accumulated >= amount {
+					break Work
+				}
+			}
+		}
+	}
+	return accumulated, unspentOuts
 }
